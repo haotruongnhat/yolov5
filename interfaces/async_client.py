@@ -50,14 +50,13 @@ def exchange(client_port, server_port, im_path, conf_thres):
             if score >= conf_thres:
                 processed_dict["boxes"].append(
                     {
-                        class_name: [int(v) for v in bbox]
+                        str(score) : [int(v) for v in bbox]
                     }
                 )
-
         return json.dumps(processed_dict)
 
 if __name__ == "__main__":
-    im_path = "test.jpg"
+    im_path = "01042022_2.jpg"
     ip = "127.0.0.1"
     server_addr = 50000
     client_addr = 50002

@@ -281,8 +281,8 @@ def infer(model, image_path, image_size, stride, conf_thres=0.1, iou_thres=0.2, 
             # Write results
             for *xyxy, conf, cls in reversed(det):
                 # xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                result_dict["boxes"].append(xyxy)
-                result_dict["scores"].append(float(conf))
+                result_dict["boxes"].append(list(xyxy))
+                result_dict["scores"].append(conf.item())
 
         result_list.append(result_dict)
 
