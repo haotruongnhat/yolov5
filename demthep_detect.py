@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from interfaces.socket_chunk import chunk_send, chunk_recv
 import onnxruntime
-
+from sklearn.cluster import DBSCAN
 import json
 import socket
 import time
@@ -193,8 +193,8 @@ def non_max_suppression(prediction,
 
         # Detections matrix nx6 (xyxy, conf, cls)
         if multi_label:
-            i, j = (x[:, 5:] > conf_thres).nonzero(as_tuple=False).T
-            x = np.concatenate((box[i], x[i, j + 5, None], j[:, None].float()), 1)
+            i, j = (x[:, 5:] > conf_thres).nonzero()
+            x = np.concatenate((box[i], x[i, j + 5, None], j[:, None].astype(np.float32)), 1)
         else:  # best class only
             conf = x[:, 5:].max(1, keepdims=True)
             j = np.zeros(conf.shape).astype(np.float32)
@@ -237,10 +237,54 @@ def non_max_suppression(prediction,
 
     return output
 
-def infer(model, image_path, image_size, stride, conf_thres=0.1, iou_thres=0.2, max_det=300):
+def group_filter(bboxes, scores, classes, eps_m, eps_o, num_samples):
+    if not bboxes:
+        return [], []
+
+    bboxes_np = np.array(bboxes)
+    # import pdb; pdb.set_trace()
+    x = (bboxes_np[:, 2] + bboxes_np[:, 0])/2
+    y = (bboxes_np[:, 3] + bboxes_np[:, 1])/2
+    bboxes_center = np.concatenate((x.reshape(-1, 1), y.reshape(-1, 1)), 1) 
+
+    average_size = np.mean(bboxes_np[:, 2] - bboxes_np[:, 0])
+
+    eps_coeff = eps_m*average_size + eps_o
+
+    db = DBSCAN(eps=eps_coeff, min_samples=num_samples).fit(bboxes_center)
+    # print(db.labels_)
+    unq, counts = np.unique(db.labels_, return_counts=True)
+    largest_blob_index = np.argmax(counts)
+    largest_index =  unq[largest_blob_index]
+
+    selected_indexes = np.where( np.array(db.labels_) == largest_index )
+    filter_bboxes = np.array(bboxes)[selected_indexes]
+    filter_scores = np.array(scores)[selected_indexes]
+    filter_classes = np.array(classes)[selected_indexes]
+
+    return filter_bboxes.tolist(), filter_scores.tolist(), filter_classes.tolist()
+
+
+def infer(model, image_size, stride, config, max_det=300):
     dt, seen = [0.0, 0.0, 0.0], 0
 
-    im = cv2.imread(image_path)
+    image_path = config["im_path"]
+    conf_thres = config["detect_config"]["conf_thres"]
+    nms = config["detect_config"]["nms"]
+    eps_enable = config["filter_config"]["eps_enable"]
+    eps_m = config["filter_config"]["eps_m"]
+    eps_o = config["filter_config"]["eps_o"]
+    num_samples = config["filter_config"]["num_samples"]
+
+    if isinstance(image_path, str):
+        im = cv2.imread(image_path)
+    else:
+        im = image_path
+
+    if im is None:
+        print("ERROR in reading image")
+        return [dict(boxes=[], scores=[], classes=[])]
+
     im0 = im.copy()
     im = letterbox(im, image_size, stride=stride, auto=False)[0]
     im = im.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
@@ -261,7 +305,7 @@ def infer(model, image_path, image_size, stride, conf_thres=0.1, iou_thres=0.2, 
     t3 = time_sync()
     dt[1] += t3 - t2
 
-    pred = non_max_suppression(pred, conf_thres, iou_thres, max_det=max_det)
+    pred = non_max_suppression(pred, conf_thres, nms, multi_label=False, max_det=max_det)
     dt[2] += time_sync() - t3
     # Process predictions
     for i, det in enumerate(pred):  # per image
@@ -273,21 +317,26 @@ def infer(model, image_path, image_size, stride, conf_thres=0.1, iou_thres=0.2, 
         if len(det):
             # Rescale boxes from img_size to im0 size
             det[:, :4] = scale_coords(im.shape[2:], det[:, :4], im0.shape).round()
-            # Print results
-            # for c in det[:, -1].unique():
-            #     n = (det[:, -1] == c).sum()  # detections per class
-            #     s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
 
             # Write results
+            boxes = []; scores = []; classes = []
             for *xyxy, conf, cls in reversed(det):
                 # xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                result_dict["boxes"].append(list(xyxy))
-                result_dict["scores"].append(conf.item())
+                confidence = conf.item()
+                if confidence >= conf_thres:
+                    boxes.append(list(xyxy))
+                    scores.append(confidence)
+                    classes.append(cls.item())
+
+            if eps_enable:
+                boxes, scores, classes = group_filter(boxes, scores, classes, eps_m, eps_o, num_samples)
+
+            result_dict["boxes"] = boxes
+            result_dict["scores"] = scores
+            result_dict["classes"] = classes
 
         result_list.append(result_dict)
 
-    # Print time (inference-only)
-    # LOGGER.info(f'{s}Done. ({t3 - t2:.3f}s)')
     # Print results
     t = tuple(x / seen * 1E3 for x in dt)  # speeds per image
     LOGGER.info(f'Speed: %.1fms pre-process, %.1fms inference, %.1fms NMS' % t)
@@ -306,13 +355,30 @@ if __name__ == "__main__":
     else:
         model_path = args["model_path"]
 
-    nms = args["nms"]
+    # model_path = "epoch_310_f23.onnx"
     weights = model_path
 
     print("Load ONNX file:", model_path)
-    model = onnxruntime.InferenceSession(model_path, providers=['CPUExecutionProvider'])
+
+    provider = ['CPUExecutionProvider']
+    if args["device"] == "gpu":
+        provider = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+    
+    model = onnxruntime.InferenceSession(model_path, providers=provider)
+    print("Running on", args["device"])
+    
     meta = model.get_modelmeta().custom_metadata_map 
     stride, names = int(meta['stride']), eval(meta['names'])
+
+    print("Dummy run. First run take longer time than normal")
+    dummy_img = np.zeros((964, 1294, 3))
+    # dummy_img = "01042022_2_2.jpg" # Toggle this to dummy as image
+    detect_config = dict(conf_thres=0.6, nms=0.25)
+    filter_config = dict(eps_enable=True, eps_m=2, eps_o=0, num_samples=3)
+    config = dict(im_path = dummy_img, detect_config=detect_config, filter_config=filter_config)
+
+    infer(model, imgsz, stride, config)[0] # Only one image
+    print("Dummy run succesfully")
 
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         ip = "127.0.0.1"
@@ -327,13 +393,15 @@ if __name__ == "__main__":
         print("Start loop")
         while True:
             print("Waiting for message")
-            image_path = chunk_recv(s)
+            config = chunk_recv(s)
 
-            print("Receive data: {}".format(image_path))
+            # print("Received data: {}".format(config))
+            print("Received data")
 
             ## Inference
-            result_dict = infer(model, image_path, imgsz, stride, iou_thres=nms)[0] # Only one image
-            print(result_dict)
+            result_dict = infer(model, imgsz, stride, config)[0] # Only one image
+            print("Number of boxes returned:", len(result_dict["boxes"]))
 
             print("Send result back to: {}".format(client_addr))
             chunk_send(result_dict, s, client_addr)
+            print("==============================================")
