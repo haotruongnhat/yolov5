@@ -10,102 +10,107 @@ import argparse
 from tqdm import tqdm
 import json
 import multiprocessing as mp
+from datetime import datetime
 
-class InferenceSession(mp.Process):
-    def __init__(self, w, provider, opt):
-        super(InferenceSession, self).__init__()
-        self.w = w
-        self.provider = provider
-        opt = opt
+# class InferenceSession(mp.Process):
+#     def __init__(self, w, provider, opt):
+#         super(InferenceSession, self).__init__()
+#         self.w = w
+#         self.provider = provider
+#         opt = opt
     
-    def run(self):
-        model_stem = Path(self.w).stem
+#     def run(self):
+#         model_stem = Path(self.w).stem
             
-        model = onnxruntime.InferenceSession(self.w, providers=self.provider)
+#         model = onnxruntime.InferenceSession(self.w, providers=self.provider)
         
-        detect_config = dict(conf_thres=0.4, nms=0.4)
-        filter_config = dict(eps_enable=True, eps_m=3, eps_o=0, num_samples=3)
-        config = dict(im_path = None, detect_config=detect_config, filter_config=filter_config)
+#         detect_config = dict(conf_thres=0.4, nms=0.4)
+#         filter_config = dict(eps_enable=True, eps_m=3, eps_o=0, num_samples=3)
+#         config = dict(im_path = None, detect_config=detect_config, filter_config=filter_config)
 
-        meta = model.get_modelmeta().custom_metadata_map 
-        stride, names = int(meta['stride']), eval(meta['names'])
+#         meta = model.get_modelmeta().custom_metadata_map 
+#         stride, names = int(meta['stride']), eval(meta['names'])
                 
-        images = list(Path(opt.data_dir).glob("**\*.jpg"))
+#         images = list(Path(opt.data_dir).glob("**\*.jpg"))
 
-        ### Create folder:
-        output_overlay_path = os.path.join(opt.output_dir, model_stem, "overlays")
-        output_label_path = os.path.join(opt.output_dir, model_stem, "labels")
-        output_original_image_path = os.path.join(opt.output_dir, model_stem, "images")
-        create_dir(opt.output_dir)
-        create_dir(output_overlay_path)
-        create_dir(output_label_path)
-        create_dir(output_original_image_path)
+#         ### Create folder:
+#         output_overlay_path = os.path.join(opt.output_dir, model_stem, "overlays")
+#         output_label_path = os.path.join(opt.output_dir, model_stem, "labels")
+#         output_original_image_path = os.path.join(opt.output_dir, model_stem, "images")
+#         create_dir(opt.output_dir)
+#         create_dir(output_overlay_path)
+#         create_dir(output_label_path)
+#         create_dir(output_original_image_path)
 
-        ###
-        dt, seen = 0.0, 0
+#         ###
+#         dt, seen = 0.0, 0
 
-        output = {}
-        output["time"] = {}
+#         output = {}
+#         output["time"] = {}
 
-        for image_path in tqdm(images):
-            image_name = image_path.name
-            image_stem = image_path.stem
-            str_im_path = str(image_path)
-            config["im_path"] = str(image_path)
-
-            t1 = time_sync()
-            result_dict = infer(model, opt.imgsz, stride, config, verbose=False)[0] # Only one image
-
-            if opt.save_label:
-                path = os.path.join(output_label_path, image_stem + ".txt")
-                save_txt(path, result_dict, opt.imgsz)
-
-            if opt.save_overlay:
-                path = os.path.join(output_overlay_path, image_name)
-                cv2.imwrite(path, draw(path, result_dict))
-
-            if opt.save_image:
-                path = os.path.join(output_original_image_path, image_name)
-                cv2.imwrite(path, cv2.imread(str(image_path)))
-
-            if image_path not in output.keys():
-                output[str_im_path] = {}
-
-            # output[image_path][model_stem] = {}
-            output[str_im_path][model_stem] = result_dict
-
-            t2 = time_sync()
-
-            dt += t2-t1
-            seen += 1
+#         for image_path in tqdm(images):
+#             image_name = image_path.name
+#             image_stem = image_path.stem
+#             str_im_path = str(image_path)
+#             config["im_path"] = str(image_path)
         
-        t = dt/seen
-        
-        print("Execution time on average [{}]: {}".format(model_stem, round(t, 2)))
-        output["time"][model_stem] = t
+#             t1 = time_sync()
+#             result_dict = infer(model, opt.imgsz, stride, config, verbose=False)[0] # Only one image
 
-        with open(os.path.join(opt.output_dir, model_stem, "inference_data.json"), "w") as f:
-            json.dump(output, f)
+#             if opt.save_label:
+#                 path = os.path.join(output_label_path, image_stem + ".txt")
+#                 save_txt(path, result_dict, opt.imgsz)
+
+#             if opt.save_overlay:
+#                 path = os.path.join(output_overlay_path, image_name)
+#                 cv2.imwrite(path, draw(path, result_dict))
+
+#             if opt.save_image:
+#                 path = os.path.join(output_original_image_path, image_name)
+#                 cv2.imwrite(path, cv2.imread(str(image_path)))
+
+#             if image_path not in output.keys():
+#                 output[str_im_path] = {}
+
+#             # output[image_path][model_stem] = {}
+#             output[str_im_path][model_stem] = result_dict
+
+#             t2 = time_sync()
+
+#             dt += t2-t1
+#             seen += 1
+        
+#         t = dt/seen
+        
+#         print("Execution time on average [{}]: {}".format(model_stem, round(t, 2)))
+#         output["time"][model_stem] = t
+
+#         with open(os.path.join(opt.output_dir, model_stem, "inference_data.json"), "w") as f:
+#             json.dump(output, f)
 
 def inference(w, provider, opt):
     model_stem = Path(w).stem
         
     model = onnxruntime.InferenceSession(w, providers=provider)
     
-    detect_config = dict(conf_thres=0.4, nms=0.4)
-    filter_config = dict(eps_enable=True, eps_m=3, eps_o=0, num_samples=3)
+    detect_config = dict(conf_thres=0.5, nms=0.6)
+    filter_config = dict(eps_enable=False, eps_m=3, eps_o=0, num_samples=3)
     config = dict(im_path = None, detect_config=detect_config, filter_config=filter_config)
 
     meta = model.get_modelmeta().custom_metadata_map 
     stride, names = int(meta['stride']), eval(meta['names'])
             
-    images = list(Path(opt.data_dir).glob("**\*.jpg"))
+    images = list(Path(opt.data_dir).glob("*.jpg"))
 
     ### Create folder:
-    output_overlay_path = os.path.join(opt.output_dir, model_stem, "overlays")
-    output_label_path = os.path.join(opt.output_dir, model_stem, "labels")
-    output_original_image_path = os.path.join(opt.output_dir, model_stem, "images")
-    create_dir(opt.output_dir)
+    date_time = datetime.now()
+    d = date_time.strftime("%d_%m_%Y_%H_%M")
+    output_dir = os.path.join(opt.output_dir, d)
+    output_overlay_path = os.path.join(output_dir, model_stem, "overlays")
+    output_label_path = os.path.join(output_dir, model_stem, "labels")
+    output_original_image_path = os.path.join(output_dir, model_stem, "images")
+    
+    create_dir(output_dir)
     create_dir(output_overlay_path)
     create_dir(output_label_path)
     create_dir(output_original_image_path)
@@ -115,6 +120,11 @@ def inference(w, provider, opt):
 
     ###
     dt, seen = 0.0, 0
+
+    output_classes_file = os.path.join(output_label_path, "classes.txt")
+    classes_file = open(output_classes_file, "w")
+    classes_file.write("thep")
+    classes_file.close()
 
     for image_path in tqdm(images):
         image_name = image_path.name
@@ -127,11 +137,11 @@ def inference(w, provider, opt):
 
         if opt.save_label:
             path = os.path.join(output_label_path, image_stem + ".txt")
-            save_txt(path, result_dict, opt.imgsz)
+            save_txt(path, result_dict, [964, 1294])#opt.imgsz)
 
         if opt.save_overlay:
             path = os.path.join(output_overlay_path, image_name)
-            cv2.imwrite(path, draw(path, result_dict))
+            cv2.imwrite(path, draw(str_im_path, result_dict, opt.print_score))
 
         if opt.save_image:
             path = os.path.join(output_original_image_path, image_name)
@@ -153,8 +163,12 @@ def inference(w, provider, opt):
     print("Execution time on average [{}]: {}".format(model_stem, round(t, 2)))
     output["time"][model_stem] = t
 
-    with open(os.path.join(opt.output_dir, model_stem, "inference_data.json"), "w") as f:
+    with open(os.path.join(output_dir, model_stem, "inference_data.json"), "w") as f:
         json.dump(output, f)
+
+    with open(os.path.join(output_dir, model_stem, "config.json"), "w") as f:
+        json.dump(config, f)
+
     return output
 
 def merge(a, b, path=None):
@@ -225,6 +239,7 @@ if __name__ == "__main__":
     parser.add_argument('--save_label', action='store_true')
     parser.add_argument('--save_image', action='store_true')
     parser.add_argument('--save_overlay', action='store_true')
+    parser.add_argument('--print_score', action='store_true')
 
     parser.add_argument('--save_difference', action='store_true')
 
@@ -232,8 +247,10 @@ if __name__ == "__main__":
     opt.imgsz = [int(v) for v in opt.imgsz.split(",")]
 
     provider = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+    # provider = ['CPUExecutionProvider']
+
     dummy_img = np.zeros((964, 1294, 3))
-    detect_config = dict(conf_thres=0.4, nms=0.4)
+    detect_config = dict(conf_thres=0.4, nms=0.4) ## Not use this
     filter_config = dict(eps_enable=True, eps_m=3, eps_o=0, num_samples=3)
     config = dict(im_path = dummy_img, detect_config=detect_config, filter_config=filter_config)
 
@@ -243,18 +260,20 @@ if __name__ == "__main__":
     # sess1.start(); sess2.start()
     # sess1.join(); sess2.join()
 
-    # output1 = inference(opt.weights[0], provider, opt)
-    # output2 = inference(opt.weights[1], provider, opt)
+    output1 = inference(opt.weights[0], provider, opt)
+    if len(opt.weights) == 2:
+        output2 = inference(opt.weights[1], provider, opt)
 
-    with open(os.path.join(opt.output_dir, Path(opt.weights[0]).stem, "inference_data.json")) as f:
-        output1 = json.load(f)
-    with open(os.path.join(opt.output_dir, Path(opt.weights[1]).stem, "inference_data.json")) as f:
-        output2 = json.load(f)
+    # with open(os.path.join(opt.output_dir, Path(opt.weights[0]).stem, "inference_data.json")) as f:
+    #     output1 = json.load(f)
+    # with open(os.path.join(opt.output_dir, Path(opt.weights[1]).stem, "inference_data.json")) as f:
+    #     output2 = json.load(f)
     
-    output = merge(output1, output2)
 
     ## Comparision on two models
     if len(opt.weights) == 2:
+        output = merge(output1, output2)
+
         output_diff_dir = os.path.join(opt.output_dir, "diff")
         create_dir(output_diff_dir)
 
