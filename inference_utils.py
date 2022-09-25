@@ -111,13 +111,18 @@ def create_dir(dir):
     except: 
         pass
 
-def draw(image, result):
+def draw(image, result, print_score=True):
     im = cv2.imread(image)
+    for box, score in zip(result["boxes"], result["scores"]):
+        x1, y1, x2, y2 = box
+        im = cv2.circle(im, (int((x1+x2)/2), int((y1+y2)/2)), int(min([x2-x1, y2-y1])/2) - 4, (255, 0, 0), thickness=3)
+
     for box, score in zip(result["boxes"], result["scores"]):
         score_str = str(round(score, 2))
         x1, y1, x2, y2 = box
-        cv2.putText(im, score_str, (x1, y1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), thickness=2)
-        im = cv2.circle(im, (int((x1+x2)/2), int((y1+y2)/2)), int(min([x2-x1, y2-y1])/2) - 4, (255, 0, 0), thickness=-1)
+
+        if print_score:
+            cv2.putText(im, score_str, (x1, y1-3), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), thickness=2)
 
     cv2.putText(im, str(len(result["boxes"])), (100, 100),  cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 0), thickness=3)
 
@@ -125,12 +130,13 @@ def draw(image, result):
 
 def save_txt(path, result, image_shape):
     gn = np.array(image_shape)[[1, 0, 1, 0]]
-    for box, cls in zip(result["boxes"], result["classes"]):
-        xyxy = np.array(list(box.values())[0])
-        xywh = (xyxy2xywh(xyxy.reshape(1, -1)) / gn).reshape(-1) .tolist()  # normalized xywh
-        line = cls, *xywh # label format
-        with open(path, 'a') as f:
-            f.write(('%g ' * len(line)).rstrip() % line + '\n')
+    with open(path, 'w') as f:
+        if result["boxes"]:
+            for box, cls in zip(result["boxes"], result["classes"]):
+                xyxy = np.array(box)
+                xywh = (xyxy2xywh(xyxy.reshape(1, -1)) / gn).reshape(-1) .tolist()  # normalized xywh
+                line = cls, *xywh # label format
+                f.write(('%g ' * len(line)).rstrip() % line + '\n')
 
 def save_classes_txt(path):
     with open(path, 'a') as f:

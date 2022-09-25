@@ -34,7 +34,9 @@ def split_img_label(data_train,data_test, output_parent_folder):
             continue
         shutil.copyfile(data_test[test_ind[i]].split('.jpg')[0]+'.txt', os.path.join(test_label_folder, data_test[test_ind[i]].split(DELIMITER)[-1].split(".jpg")[0] +'.txt'))
 
-PATH = 'D:\Projects\VSTech\yolov5\outputs\data_full\data'
+PATH = 'D:\Projects\VSTech\yolov5\outputs\data_new_view\checked_data_more_image'
+output_parent_folder = "D:\Projects\VSTech\yolov5\outputs\data_new_view\checked_data_more_image\output_split_095"
+
 list_img=[img for img in os.listdir(PATH) if img.endswith('.jpg')==True]
 list_txt=[img for img in os.listdir(PATH) if img.endswith('.txt')==True]
 
@@ -46,9 +48,8 @@ for i in range (len(list_img)):
 df = pd.DataFrame(path_img)
 
 # split 
-data_train, data_test, labels_train, labels_test = train_test_split(df[0], df.index, test_size=0.20, random_state=42)
+data_train, data_test, labels_train, labels_test = train_test_split(df[0], df.index, test_size=0.05, random_state=42)
 
-output_parent_folder = "D:\Projects\VSTech\yolov5\outputs\data_full\output"
 # Function split 
 split_img_label(data_train, data_test, output_parent_folder)
 
