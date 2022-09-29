@@ -12,90 +12,20 @@ import json
 import multiprocessing as mp
 from datetime import datetime
 
-# class InferenceSession(mp.Process):
-#     def __init__(self, w, provider, opt):
-#         super(InferenceSession, self).__init__()
-#         self.w = w
-#         self.provider = provider
-#         opt = opt
-    
-#     def run(self):
-#         model_stem = Path(self.w).stem
-            
-#         model = onnxruntime.InferenceSession(self.w, providers=self.provider)
-        
-#         detect_config = dict(conf_thres=0.4, nms=0.4)
-#         filter_config = dict(eps_enable=True, eps_m=3, eps_o=0, num_samples=3)
-#         config = dict(im_path = None, detect_config=detect_config, filter_config=filter_config)
-
-#         meta = model.get_modelmeta().custom_metadata_map 
-#         stride, names = int(meta['stride']), eval(meta['names'])
-                
-#         images = list(Path(opt.data_dir).glob("**\*.jpg"))
-
-#         ### Create folder:
-#         output_overlay_path = os.path.join(opt.output_dir, model_stem, "overlays")
-#         output_label_path = os.path.join(opt.output_dir, model_stem, "labels")
-#         output_original_image_path = os.path.join(opt.output_dir, model_stem, "images")
-#         create_dir(opt.output_dir)
-#         create_dir(output_overlay_path)
-#         create_dir(output_label_path)
-#         create_dir(output_original_image_path)
-
-#         ###
-#         dt, seen = 0.0, 0
-
-#         output = {}
-#         output["time"] = {}
-
-#         for image_path in tqdm(images):
-#             image_name = image_path.name
-#             image_stem = image_path.stem
-#             str_im_path = str(image_path)
-#             config["im_path"] = str(image_path)
-        
-#             t1 = time_sync()
-#             result_dict = infer(model, opt.imgsz, stride, config, verbose=False)[0] # Only one image
-
-#             if opt.save_label:
-#                 path = os.path.join(output_label_path, image_stem + ".txt")
-#                 save_txt(path, result_dict, opt.imgsz)
-
-#             if opt.save_overlay:
-#                 path = os.path.join(output_overlay_path, image_name)
-#                 cv2.imwrite(path, draw(path, result_dict))
-
-#             if opt.save_image:
-#                 path = os.path.join(output_original_image_path, image_name)
-#                 cv2.imwrite(path, cv2.imread(str(image_path)))
-
-#             if image_path not in output.keys():
-#                 output[str_im_path] = {}
-
-#             # output[image_path][model_stem] = {}
-#             output[str_im_path][model_stem] = result_dict
-
-#             t2 = time_sync()
-
-#             dt += t2-t1
-#             seen += 1
-        
-#         t = dt/seen
-        
-#         print("Execution time on average [{}]: {}".format(model_stem, round(t, 2)))
-#         output["time"][model_stem] = t
-
-#         with open(os.path.join(opt.output_dir, model_stem, "inference_data.json"), "w") as f:
-#             json.dump(output, f)
+import sys
+from loguru import logger
+logger.remove()
+logger.add(sys.stderr, format='<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <level>{message}</level>', level="INFO")
 
 def inference(w, provider, opt):
     model_stem = Path(w).stem
         
     model = onnxruntime.InferenceSession(w, providers=provider)
     
-    detect_config = dict(conf_thres=0.5, nms=0.6)
-    filter_config = dict(eps_enable=False, eps_m=3, eps_o=0, num_samples=3)
-    config = dict(im_path = None, detect_config=detect_config, filter_config=filter_config)
+    detect_config = dict(conf_thres=0.6, nms=0.6)
+    filter_config = dict(eps_enable=True, eps_m=4, eps_o=0, eps_samples=3,\
+                        black_sample_filter_enable=True, black_sample_threshold=80)
+    config = dict(im_path = None, total_samples=150, detect_config=detect_config, filter_config=filter_config)
 
     meta = model.get_modelmeta().custom_metadata_map 
     stride, names = int(meta['stride']), eval(meta['names'])
@@ -126,6 +56,7 @@ def inference(w, provider, opt):
     classes_file.write("thep")
     classes_file.close()
 
+    wrong_count = 0
     for image_path in tqdm(images):
         image_name = image_path.name
         image_stem = image_path.stem
@@ -135,6 +66,10 @@ def inference(w, provider, opt):
         t1 = time_sync()
         result_dict = infer(model, opt.imgsz, stride, config, verbose=False)[0] # Only one image
 
+        if len(result_dict["boxes"]) == 150:
+            continue
+
+        wrong_count += 1
         if opt.save_label:
             path = os.path.join(output_label_path, image_stem + ".txt")
             save_txt(path, result_dict, [964, 1294])#opt.imgsz)
@@ -158,10 +93,10 @@ def inference(w, provider, opt):
         dt += t2-t1
         seen += 1
     
-    t = dt/seen
-    
-    print("Execution time on average [{}]: {}".format(model_stem, round(t, 2)))
-    output["time"][model_stem] = t
+    # t = dt/seen
+    print("Wrong count:", wrong_count)
+    # print("Execution time on average [{}]: {}".format(model_stem, round(t, 2)))
+    # output["time"][model_stem] = t
 
     with open(os.path.join(output_dir, model_stem, "inference_data.json"), "w") as f:
         json.dump(output, f)
@@ -249,10 +184,10 @@ if __name__ == "__main__":
     provider = ['CUDAExecutionProvider', 'CPUExecutionProvider']
     # provider = ['CPUExecutionProvider']
 
-    dummy_img = np.zeros((964, 1294, 3))
-    detect_config = dict(conf_thres=0.4, nms=0.4) ## Not use this
-    filter_config = dict(eps_enable=True, eps_m=3, eps_o=0, num_samples=3)
-    config = dict(im_path = dummy_img, detect_config=detect_config, filter_config=filter_config)
+    # dummy_img = np.zeros((964, 1294, 3))
+    # detect_config = dict(conf_thres=0.4, nms=0.4) ## Not use this
+    # filter_config = dict(eps_enable=True, eps_m=3, eps_o=0, eps_num_samples=3)
+    # config = dict(im_path = dummy_img, detect_config=detect_config, filter_config=filter_config)
 
     # mp.set_start_method('spawn')
     # sess1 = mp.Process(target = inference, args=(opt.weights[0], provider, opt, ))#InferenceSession(opt.weights[0], provider, opt)

@@ -3,21 +3,34 @@ from sklearn.cluster import DBSCAN
 import time
 import numpy as np
 import cv2
-import logging 
+from loguru import logger
 
 CLASSES = ["thep",]
 VERBOSE = str(os.getenv('VERBOSE', True)).lower() == 'true'  # global verbose mode
+
+def decrease_brightness(img, value=30):
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    hsv[:,:,2] = cv2.subtract(hsv[:,:,2], value)
+    image = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+
+    after_average_brightness = int(np.average(hsv[:,:,2].flatten()))
+    return image
 
 def infer(model, image_size, stride, config, max_det=300, verbose=True):
     dt, seen = [0.0, 0.0, 0.0], 0
 
     image_path = config["im_path"]
+
+    total_samples = config["total_samples"]
     conf_thres = config["detect_config"]["conf_thres"]
     nms = config["detect_config"]["nms"]
     eps_enable = config["filter_config"]["eps_enable"]
     eps_m = config["filter_config"]["eps_m"]
     eps_o = config["filter_config"]["eps_o"]
-    num_samples = config["filter_config"]["num_samples"]
+    eps_samples = config["filter_config"]["eps_samples"]
+
+    black_sample_filter_enable = config["filter_config"]["black_sample_filter_enable"]
+    black_sample_threshold = config["filter_config"]["black_sample_threshold"]
 
     if isinstance(image_path, str):
         im = cv2.imread(image_path)
@@ -71,8 +84,31 @@ def infer(model, image_size, stride, config, max_det=300, verbose=True):
                     scores.append(confidence)
                     classes.append(cls.item())
 
+            total_detection = len(boxes)
+            logger.debug("Total detection: {}".format(total_detection))
+
             if eps_enable:
-                boxes, scores, classes = group_filter(boxes, scores, classes, eps_m, eps_o, num_samples)
+                filter_boxes, filter_scores, filter_classes = group_filter(boxes, scores, classes, eps_m, eps_o, eps_samples)
+
+                diff = total_detection - len(filter_boxes)
+                logger.debug("Apply eps filter. Filterred samples: {}".format(diff))
+
+                boxes = filter_boxes
+                scores = filter_scores
+                classes = filter_classes
+
+            ### Usually to filter true negative
+            if black_sample_filter_enable and (total_detection > total_samples):
+                filter_boxes, filter_scores, filter_classes = black_sample_filter(im0, boxes, scores, classes, black_sample_threshold, total_samples)
+        
+                diff = total_detection - len(filter_boxes)
+                logger.debug("Apply black sample filter. Filterred samples: {}".format(diff))
+
+                boxes = filter_boxes
+                scores = filter_scores
+                classes = filter_classes
+
+            logger.debug("Final detection after filter: {}".format(len(boxes)))
 
             result_dict["boxes"] = boxes
             result_dict["scores"] = scores
@@ -83,24 +119,9 @@ def infer(model, image_size, stride, config, max_det=300, verbose=True):
     # Print results
     t = tuple(x / seen * 1E3 for x in dt)  # speeds per image
     if verbose:
-        LOGGER.info(f'Speed: %.1fms pre-process, %.1fms inference, %.1fms NMS' % t)
+        logger.info(f'Speed: %.1fms pre-process, %.1fms inference, %.1fms NMS' % t)
 
     return result_list
-
-def set_logging(name=None, verbose=VERBOSE):
-    # Sets level and returns logger
-    rank = int(os.getenv('RANK', -1))  # rank in world for Multi-GPU trainings
-    level = logging.INFO if (verbose and rank in (-1, 0)) else logging.WARNING
-    log = logging.getLogger(name)
-    log.setLevel(level)
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(message)s"))
-    handler.setLevel(level)
-    log.addHandler(handler)
-
-
-set_logging()  # run before defining LOGGER
-LOGGER = logging.getLogger("demthep")  # define globally (used in train.py, val.py, detect.py, etc.)
 
 def time_sync():
     return time.time()
@@ -381,3 +402,29 @@ def group_filter(bboxes, scores, classes, eps_m, eps_o, num_samples):
     filter_classes = np.array(classes)[selected_indexes]
 
     return filter_bboxes.tolist(), filter_scores.tolist(), filter_classes.tolist()
+
+def black_sample_filter(im0, bboxes, scores, classes, black_sample_threshold, total_samples):
+    if not bboxes:
+        return [], []
+
+    bboxes_np = np.array(bboxes)
+
+    diff = len(bboxes) - total_samples 
+    bois = bboxes_np[:diff]
+    gray = cv2.cvtColor(im0, cv2.COLOR_BGR2GRAY)
+
+    for index, boi in enumerate(bois):
+        x1, y1, x2, y2 = boi
+        roi = gray[y1:y2, x1:x2]
+
+        average_gray = np.average(roi)
+        logger.debug("[black_sample_filter] Checking false-positive with avg. gray: {}".format(average_gray))
+        
+        if average_gray < black_sample_threshold:
+            logger.debug("[black_sample_filter] Found and eliminate false-positive with avg. gray: {}".format(average_gray))
+
+            del bboxes[index]
+            del scores[index]
+            del classes[index]
+
+    return bboxes, scores, classes
