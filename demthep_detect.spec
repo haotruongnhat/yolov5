@@ -38,7 +38,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='demthep_detect',
+    name='demthep_detect_test_udp',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

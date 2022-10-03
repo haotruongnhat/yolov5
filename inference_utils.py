@@ -87,26 +87,32 @@ def infer(model, image_size, stride, config, max_det=300, verbose=True):
             total_detection = len(boxes)
             logger.debug("Total detection: {}".format(total_detection))
 
-            if eps_enable:
-                filter_boxes, filter_scores, filter_classes = group_filter(boxes, scores, classes, eps_m, eps_o, eps_samples)
+            try:
+                if eps_enable:
+                    filter_boxes, filter_scores, filter_classes = group_filter(boxes, scores, classes, eps_m, eps_o, eps_samples)
 
-                diff = total_detection - len(filter_boxes)
-                logger.debug("Apply eps filter. Filterred samples: {}".format(diff))
+                    diff = total_detection - len(filter_boxes)
+                    logger.debug("Apply eps filter. Filterred samples: {}".format(diff))
 
-                boxes = filter_boxes
-                scores = filter_scores
-                classes = filter_classes
+                    boxes = filter_boxes
+                    scores = filter_scores
+                    classes = filter_classes
+            except Exception as e:
+                logger.exception(e)
 
-            ### Usually to filter true negative
-            if black_sample_filter_enable and (total_detection > total_samples):
-                filter_boxes, filter_scores, filter_classes = black_sample_filter(im0, boxes, scores, classes, black_sample_threshold, total_samples)
-        
-                diff = total_detection - len(filter_boxes)
-                logger.debug("Apply black sample filter. Filterred samples: {}".format(diff))
+            try:
+                ### Usually to filter true negative
+                if black_sample_filter_enable and (total_detection > total_samples):
+                    filter_boxes, filter_scores, filter_classes = black_sample_filter(im0, boxes, scores, classes, black_sample_threshold, total_samples)
+            
+                    diff = total_detection - len(filter_boxes)
+                    logger.debug("Apply black sample filter. Filterred samples: {}".format(diff))
 
-                boxes = filter_boxes
-                scores = filter_scores
-                classes = filter_classes
+                    boxes = filter_boxes
+                    scores = filter_scores
+                    classes = filter_classes
+            except Exception as e:
+                logger.exception(e)
 
             logger.debug("Final detection after filter: {}".format(len(boxes)))
 
@@ -371,7 +377,7 @@ def non_max_suppression(prediction,
 
         output[xi] = x[i]
         if (time.time() - t) > time_limit:
-            LOGGER.warning(f'WARNING: NMS time limit {time_limit:.3f}s exceeded')
+            logger.warning(f'WARNING: NMS time limit {time_limit:.3f}s exceeded')
             break  # time limit exceeded
 
     return output
@@ -409,7 +415,16 @@ def black_sample_filter(im0, bboxes, scores, classes, black_sample_threshold, to
 
     bboxes_np = np.array(bboxes)
 
-    diff = len(bboxes) - total_samples 
+    diff = len(bboxes) - total_samples
+
+    logger.debug("[black_sample_filter] Difference: {}".format(diff))
+
+    if diff > 4:
+        diff = 4
+
+    if diff < 1:
+        return bboxes, scores, classes
+
     bois = bboxes_np[:diff]
     gray = cv2.cvtColor(im0, cv2.COLOR_BGR2GRAY)
 

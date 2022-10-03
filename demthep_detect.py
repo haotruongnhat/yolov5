@@ -13,7 +13,7 @@ import sys
 from loguru import logger
 logger.remove()
 logger.add(sys.stderr, format='<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <6}</level> | <level>{message}</level>', level="INFO")
-logger.add("demthep_detect.log", format='<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <6}</level> | <level>{message}</level>', level="DEBUG")
+logger.add("demthep_detect_{time:YYYY_MM_DD}.log", format='<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <6}</level> | <level>{message}</level>', level="DEBUG")
 
 if __name__ == "__main__":
     try:
